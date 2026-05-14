@@ -46,3 +46,7 @@ slurm/*.err
 *.key
 *.pem
 hf_token*
+
+# Symlinks to scratch (match without trailing slash too)
+/data
+/outputs
