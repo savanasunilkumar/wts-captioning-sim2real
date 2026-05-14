@@ -2,18 +2,30 @@
 
 **Date:** 2026-05-14
 **Setup:** 8-way parallel SLURM array, A100 80GB × 8, ~30 min wallclock
+**Model:** Qwen/Qwen3-VL-8B-Instruct (no fine-tune, no few-shot, no SAM regions)
 
-## Numbers
+## Final Scores
 
-| Metric | Value |
+| Subtask | Score |
 |---|---|
-| Scenarios | 48 (full val) |
-| Caption segments | 240 |
-| VQA questions | 3,531 |
+| Captioning (mean of BLEU-4/METEOR/ROUGE-L/CIDEr × 100) | **6.93** |
 | VQA accuracy | **48.63%** |
-| Random baseline (4-choice) | 25% |
+| **Combined (mean of both)** | **27.78** |
 
-## Notes
-- No fine-tuning, no few-shot, no SAM regions yet.
-- Captions are too short (~30 words vs ~200-word GT). Expect low BLEU/CIDEr.
-- VQA much stronger relative to random because the model has real scene understanding.
+## Captioning detail
+
+| Metric | Pedestrian | Vehicle |
+|---|---|---|
+| BLEU-4 | 0.008 | 0.009 |
+| METEOR | 0.104 | 0.110 |
+| ROUGE-L | 0.140 | 0.182 |
+| CIDEr | 0.003 | 0.008 |
+
+## Stats
+- 48 scenarios (full val split)
+- 240 caption segments (5 per scenario × 48)
+- 3,531 VQA questions
+
+## Headroom
+- Captions are ~30 words (GT ~200 words) → fixable with few-shot prompting + LoRA FT.
+- VQA at 2× random already, but room to grow with per-phase video clipping + FT.
