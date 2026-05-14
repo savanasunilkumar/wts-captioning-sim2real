@@ -89,6 +89,7 @@ def main():
     p.add_argument("--model-path", default="/ptmp/anujs/savana/aicity-data/weights/Qwen3-VL-8B-Instruct")
     p.add_argument("--out-dir", default="/work/anujs/savana/aicity-track2/outputs/zeroshot")
     p.add_argument("--max-scenarios", type=int, default=None)
+    p.add_argument("--scenario-slice", type=str, default=None, help="i/n: take every nth scenario starting at i")
     p.add_argument("--max-pixels", type=int, default=360*640)
     p.add_argument("--fps", type=float, default=1.0)
     p.add_argument("--skip-captions", action="store_true")
@@ -108,7 +109,14 @@ def main():
     ds = WTSDataset(args.data_root, split=args.split)
     scenarios = ds.scenarios()
     if args.max_scenarios: scenarios = scenarios[:args.max_scenarios]
-    print(f"Processing {len(scenarios)} scenarios from {args.data_root}/{args.split}")
+    if args.scenario_slice:
+        i, n = map(int, args.scenario_slice.split("/"))
+        scenarios = scenarios[i::n]
+        out_dir = out_dir / f"shard_{i}_of_{n}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Slice {i}/{n}: processing {len(scenarios)} scenarios -> {out_dir}")
+    else:
+        print(f"Processing {len(scenarios)} scenarios from {args.data_root}/{args.split}")
 
     cap_sub = defaultdict(list)
     vqa_sub, vqa_gt = [], []
