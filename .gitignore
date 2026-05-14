@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# ML weights & checkpoints (HUGE — never commit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.ckpt
+*.onnx
+*.tflite
+
+# Data (symlinked to /ptmp scratch)
+data/
+outputs/
+wandb/
+mlruns/
+
+# Logs
+*.log
+logs/
+slurm/*.out
+slurm/*.err
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+hf_token*
