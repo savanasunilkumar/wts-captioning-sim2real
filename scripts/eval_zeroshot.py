@@ -5,7 +5,7 @@ Outputs two JSONs in AI City Track 2 submission format:
   - submission_vqa.json
 """
 from __future__ import annotations
-import argparse, json, re, sys, time
+import argparse, json, random, re, sys, time
 from pathlib import Path
 from collections import defaultdict
 
@@ -24,6 +24,18 @@ PEDESTRIAN: <pedestrian's position relative to vehicle, attention/line of sight,
 VEHICLE: <vehicle's position relative to pedestrian, field of view, action and speed, and environment>
 
 Output only those two labeled lines."""
+
+CAP_PROMPT_FEWSHOT = """You are a traffic safety analyst. Below is an example of a high-quality caption pair for the {phase_name} phase of a pedestrian-vehicle traffic event. Match this exact style, level of detail, and length (~150-200 words per caption).
+
+EXAMPLE (style reference only — different scenario):
+PEDESTRIAN: {ex_ped}
+VEHICLE: {ex_veh}
+
+Now watch THIS video segment (also a {phase_name} phase) and produce TWO captions describing what you actually observe in the video, in the same detailed style.
+
+Output exactly in this format:
+PEDESTRIAN: <detailed description>
+VEHICLE: <detailed description>"""
 
 VQA_PROMPT_PHASED = """You are a traffic safety analyst. Watch this video ({phase_name} phase).
 
@@ -82,6 +94,20 @@ def generate(model, processor, video_path: Path, prompt: str, max_new_tokens: in
     return processor.batch_decode(out[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)[0].strip()
 
 # ---------- main ----------
+def load_caption_exemplars(ds, num_per_phase: int = 1, seed: int = 42):
+    """Load N caption exemplars per phase from a dataset split."""
+    from collections import defaultdict
+    by_phase = defaultdict(list)
+    for sid in ds.scenarios():
+        for cv in ds.load_captions(sid):
+            if cv.view != "vehicle_view":
+                continue
+            for seg in cv.segments:
+                by_phase[seg.phase_num].append((seg.pedestrian, seg.vehicle))
+    rng = random.Random(seed)
+    return {p: rng.sample(by_phase[p], min(num_per_phase, len(by_phase[p]))) for p in by_phase}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--data-root", default="/ptmp/anujs/savana/aicity-data/synwts")
@@ -89,6 +115,7 @@ def main():
     p.add_argument("--model-path", default="/ptmp/anujs/savana/aicity-data/weights/Qwen3-VL-8B-Instruct")
     p.add_argument("--out-dir", default="/work/anujs/savana/aicity-track2/outputs/zeroshot")
     p.add_argument("--max-scenarios", type=int, default=None)
+    p.add_argument("--num-fewshot", type=int, default=0, help="N caption exemplars per phase from train split")
     p.add_argument("--scenario-slice", type=str, default=None, help="i/n: take every nth scenario starting at i")
     p.add_argument("--max-pixels", type=int, default=360*640)
     p.add_argument("--fps", type=float, default=1.0)
@@ -105,6 +132,13 @@ def main():
         args.model_path, torch_dtype=torch.bfloat16
     ).to("cuda").eval()
     print(f"Loaded in {time.time()-t0:.1f}s, VRAM={torch.cuda.memory_allocated()/1e9:.1f}GB")
+
+    exemplars = {}
+    if args.num_fewshot > 0:
+        train_ds = WTSDataset(args.data_root, split="train")
+        exemplars = load_caption_exemplars(train_ds, num_per_phase=args.num_fewshot)
+        n_ex = sum(len(v) for v in exemplars.values())
+        print(f"Loaded {n_ex} caption exemplars across {len(exemplars)} phases (from train)")
 
     ds = WTSDataset(args.data_root, split=args.split)
     scenarios = ds.scenarios()
@@ -134,9 +168,16 @@ def main():
             if cv and video:
                 for seg in cv.segments:
                     t = time.time()
-                    resp = generate(model, processor, video,
-                                    CAP_PROMPT.format(phase_name=seg.phase_name),
-                                    max_new_tokens=320, fps=args.fps, max_pixels=args.max_pixels)
+                    if exemplars and seg.phase_num in exemplars:
+                        ex_ped, ex_veh = exemplars[seg.phase_num][0]
+                        cap_prompt = CAP_PROMPT_FEWSHOT.format(
+                            phase_name=seg.phase_name, ex_ped=ex_ped, ex_veh=ex_veh)
+                        max_tok = 600
+                    else:
+                        cap_prompt = CAP_PROMPT.format(phase_name=seg.phase_name)
+                        max_tok = 320
+                    resp = generate(model, processor, video, cap_prompt,
+                                    max_new_tokens=max_tok, fps=args.fps, max_pixels=args.max_pixels)
                     ped, veh = parse_caption_pair(resp)
                     cap_sub[sid].append({
                         "labels": [seg.phase_num],
