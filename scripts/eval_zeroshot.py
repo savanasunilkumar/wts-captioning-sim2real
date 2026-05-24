@@ -115,6 +115,7 @@ def main():
     p.add_argument("--model-path", default="/ptmp/anujs/savana/aicity-data/weights/Qwen3-VL-8B-Instruct")
     p.add_argument("--out-dir", default="/work/anujs/savana/aicity-track2/outputs/zeroshot")
     p.add_argument("--max-scenarios", type=int, default=None)
+    p.add_argument("--adapter-path", type=str, default=None, help="LoRA adapter checkpoint to merge")
     p.add_argument("--num-fewshot", type=int, default=0, help="N caption exemplars per phase from train split")
     p.add_argument("--scenario-slice", type=str, default=None, help="i/n: take every nth scenario starting at i")
     p.add_argument("--max-pixels", type=int, default=360*640)
@@ -131,6 +132,11 @@ def main():
     model = AutoModelForImageTextToText.from_pretrained(
         args.model_path, torch_dtype=torch.bfloat16
     ).to("cuda").eval()
+    if args.adapter_path:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, args.adapter_path)
+        model = model.merge_and_unload()
+        print(f"Merged LoRA adapter: {args.adapter_path}")
     print(f"Loaded in {time.time()-t0:.1f}s, VRAM={torch.cuda.memory_allocated()/1e9:.1f}GB")
 
     exemplars = {}
