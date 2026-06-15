@@ -57,6 +57,26 @@ Question: {question}
 
 Answer with a single letter only."""
 
+VQA_PROMPT_COT_PHASED = """You are a traffic safety analyst. Watch this video segment from the {phase_name} phase of a pedestrian-vehicle traffic event.
+
+Question: {question}
+(a) {a}
+(b) {b}
+(c) {c}
+(d) {d}
+
+Think step by step about what you observe in the video (pedestrian position/orientation, vehicle action, environment), briefly evaluate each option, then end with one final line in this exact format: "Answer: X" where X is one of a, b, c, or d."""
+
+VQA_PROMPT_COT_ENV = """You are a traffic safety analyst. Watch this pedestrian-vehicle traffic video.
+
+Question: {question}
+(a) {a}
+(b) {b}
+(c) {c}
+(d) {d}
+
+Think step by step about what you observe in the video, briefly evaluate each option, then end with one final line in this exact format: "Answer: X" where X is one of a, b, c, or d."""
+
 # ---------- helpers ----------
 def parse_caption_pair(text: str) -> tuple[str, str]:
     text = text.strip()
@@ -69,6 +89,18 @@ def parse_caption_pair(text: str) -> tuple[str, str]:
 def parse_letter(text: str) -> str:
     m = re.search(r"\b([abcd])\b", text.lower())
     return m.group(1) if m else "a"
+
+def parse_letter_cot(text: str) -> str:
+    t = text.lower()
+    for pat in (r"final\s+answer\s*[:=]\s*\(?([abcd])\)?",
+                r"answer\s*[:=]\s*\(?([abcd])\)?",
+                r"answer\s+is\s+\(?([abcd])\)?",
+                r"the\s+correct\s+option\s+is\s+\(?([abcd])\)?"):
+        m = re.search(pat, t)
+        if m:
+            return m.group(1)
+    matches = re.findall(r"\b([abcd])\b", t)
+    return matches[-1] if matches else "a"
 
 def pick_video(view: str, vids: dict) -> Path | None:
     if view in vids and vids[view]:
@@ -122,6 +154,8 @@ def main():
     p.add_argument("--fps", type=float, default=1.0)
     p.add_argument("--skip-captions", action="store_true")
     p.add_argument("--skip-vqa", action="store_true")
+    p.add_argument("--vqa-mode", choices=["simple", "cot"], default="simple",
+                   help="simple = 4-token letter; cot = chain-of-thought, 256-token")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir); out_dir.mkdir(parents=True, exist_ok=True)
@@ -196,15 +230,21 @@ def main():
 
         # VQA
         if not args.skip_vqa:
+            cot = args.vqa_mode == "cot"
+            vqa_max_new = 256 if cot else 4
+            vqa_parser = parse_letter_cot if cot else parse_letter
             for q in vqas:
                 vfor = "vehicle_view" if q.view == "vehicle_view" else "overhead_view"
                 video = pick_video(vfor, vids)
                 if not video: continue
                 opts = {k: q.options.get(k, "") for k in ("a", "b", "c", "d")}
-                prompt = (VQA_PROMPT_ENV if q.view == "environment" else VQA_PROMPT_PHASED).format(
-                    phase_name=q.phase_name or "", question=q.question, **opts)
-                resp = generate(model, processor, video, prompt, max_new_tokens=4, fps=args.fps, max_pixels=args.max_pixels)
-                letter = parse_letter(resp)
+                if q.view == "environment":
+                    tmpl = VQA_PROMPT_COT_ENV if cot else VQA_PROMPT_ENV
+                else:
+                    tmpl = VQA_PROMPT_COT_PHASED if cot else VQA_PROMPT_PHASED
+                prompt = tmpl.format(phase_name=q.phase_name or "", question=q.question, **opts)
+                resp = generate(model, processor, video, prompt, max_new_tokens=vqa_max_new, fps=args.fps, max_pixels=args.max_pixels)
+                letter = vqa_parser(resp)
                 qid = f"{sid}_{q.view}_{q.file_id}_{q.question_idx}"
                 vqa_sub.append({"id": qid, "correct": letter})
                 if q.correct is not None: vqa_gt.append({"id": qid, "correct": q.correct})
